@@ -12,7 +12,7 @@ from io import BytesIO
 
 
 class VersionComparisonAnalyzer:
-    def __init__(self, old_file, new_file):
+    def __init__(self, old_file, new_file, base_dir):
         self.old_df = pd.read_csv(old_file)
         self.new_df = pd.read_csv(new_file)
         self.merged_df = None
@@ -36,15 +36,21 @@ class VersionComparisonAnalyzer:
             "Multi Turn Miss Param",
             "Multi Turn Long Context",
         ]
-        # Create output directory with timestamp
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        self.base_dir = os.path.join(
-            "scores_analytics", f"comparison_results_{timestamp}"
-        )
+        # Use provided base directory
+        self.base_dir = base_dir
         self.version_dir = os.path.join(self.base_dir, "version_summary")
         self.detailed_dir = os.path.join(self.base_dir, "detailed_analysis")
+        self.summary_dir = os.path.join(self.base_dir, "summary")
+        
+        # Create all necessary directories
         os.makedirs(self.version_dir, exist_ok=True)
         os.makedirs(self.detailed_dir, exist_ok=True)
+        os.makedirs(self.summary_dir, exist_ok=True)
+        os.makedirs(os.path.join(self.detailed_dir, "categories", "charts"), exist_ok=True)
+        os.makedirs(os.path.join(self.detailed_dir, "categories", "heatmaps"), exist_ok=True)
+        os.makedirs(os.path.join(self.detailed_dir, "categories", "data"), exist_ok=True)
+        os.makedirs(os.path.join(self.detailed_dir, "table_heatmaps"), exist_ok=True)
+
 
     def get_version_path(self, filename):
         return os.path.join(self.version_dir, filename)
@@ -622,12 +628,11 @@ class VersionComparisonAnalyzer:
 
 
 def main():
-    st.set_page_config(page_title="CSV Version Comparison Tool", layout="wide")
+    st.set_page_config(page_title="BFCL Score Comparison Tool", layout="wide")
 
-    st.title("CSV Version Comparison Tool")
+    st.title("BFCL Score Comparison Tool")
     st.write("Upload two CSV files to compare metrics and generate analysis reports")
 
-    # File uploaders
     col1, col2 = st.columns(2)
     with col1:
         st.subheader("Old Version CSV")
@@ -639,75 +644,77 @@ def main():
 
     if old_file and new_file:
         if st.button("Process Files", type="primary"):
-            with st.spinner("Processing files and generating analysis..."):
-                try:
-                    # Create temporary directory
-                    with tempfile.TemporaryDirectory() as temp_dir:
-                        # Save uploaded files
-                        old_path = os.path.join(temp_dir, "old_file.csv")
-                        new_path = os.path.join(temp_dir, "new_file.csv")
+            progress_text = st.empty()
+            try:
+                # Create temporary directory
+                with tempfile.TemporaryDirectory() as temp_dir:
+                    progress_text.text("Loading and validating input files...")
+                    
+                    # Create timestamp for this run
+                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    
+                    # Create a specific directory for this analysis
+                    analysis_dir = os.path.join(temp_dir, f"comparison_results_{timestamp}")
+                    os.makedirs(analysis_dir, exist_ok=True)
 
-                        with open(old_path, "wb") as f:
-                            f.write(old_file.getbuffer())
-                        with open(new_path, "wb") as f:
-                            f.write(new_file.getbuffer())
+                    # Save uploaded files
+                    old_path = os.path.join(temp_dir, "old_file.csv")
+                    new_path = os.path.join(temp_dir, "new_file.csv")
 
-                        # Initialize analyzer
-                        analyzer = VersionComparisonAnalyzer(old_path, new_path)
+                    with open(old_path, "wb") as f:
+                        f.write(old_file.getbuffer())
+                    with open(new_path, "wb") as f:
+                        f.write(new_file.getbuffer())
 
-                        # Process data
-                        analyzer.merge_datasets()
-                        analyzer.calculate_differences()
+                    # Initialize analyzer with the specific analysis directory
+                    analyzer = VersionComparisonAnalyzer(old_path, new_path, analysis_dir)
 
-                        # Create results directory
-                        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                        results_dir = os.path.join(
-                            temp_dir, f"comparison_results_{timestamp}"
-                        )
-                        os.makedirs(results_dir, exist_ok=True)
+                    # Process data
+                    progress_text.text("Merging datasets and calculating differences...")
+                    analyzer.merge_datasets()
+                    analyzer.calculate_differences()
 
-                        # Generate reports and plots
-                        version_report = analyzer.generate_summary_report()
-                        with open(
-                            os.path.join(results_dir, "version_comparison_report.md"),
-                            "w",
-                        ) as f:
-                            f.write(version_report)
+                    # Generate all reports and visualizations
+                    progress_text.text("Generating reports and visualizations...")
+                    version_report = analyzer.generate_summary_report()
+                    with open(os.path.join(analyzer.version_dir, "version_comparison_report.md"), "w") as f:
+                        f.write(version_report)
 
-                        analyzer.plot_summary_changes()
-                        plt.savefig(os.path.join(results_dir, "summary_changes.png"))
-                        plt.close()
+                    analyzer.plot_summary_changes()
+                    analyzer.generate_heatmap()
+                    analyzer.export_detailed_statistics()
+                    analyzer.generate_category_analysis()
+                    analyzer.generate_table_heatmaps()
+                    analyzer.generate_summary_csv()
 
-                        analyzer.generate_heatmap()
-                        analyzer.export_detailed_statistics()
-                        analyzer.generate_category_analysis()
-                        analyzer.generate_table_heatmaps()
-                        analyzer.generate_summary_csv()
+                    # Create zip file
+                    progress_text.text("Packaging results...")
+                    zip_buffer = BytesIO()
+                    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+                        # Walk through the analysis directory and add all files
+                        for root, _, files in os.walk(analysis_dir):
+                            for file in files:
+                                file_path = os.path.join(root, file)
+                                # Create archive name relative to the analysis directory
+                                arc_name = os.path.relpath(file_path, analysis_dir)
+                                zip_file.write(file_path, arc_name)
 
-                        # Create zip file
-                        zip_buffer = BytesIO()
-                        with zipfile.ZipFile(
-                            zip_buffer, "w", zipfile.ZIP_DEFLATED
-                        ) as zip_file:
-                            for root, _, files in os.walk(results_dir):
-                                for file in files:
-                                    file_path = os.path.join(root, file)
-                                    arc_name = os.path.relpath(file_path, results_dir)
-                                    zip_file.write(file_path, arc_name)
+                    zip_buffer.seek(0)
+                    
+                    progress_text.empty()
+                    st.success("Processing complete! Click below to download the analysis results.")
+                    
+                    # Offer download button
+                    st.download_button(
+                        label="Download Analysis Results",
+                        data=zip_buffer.getvalue(),
+                        file_name=f"comparison_results_{timestamp}.zip",
+                        mime="application/zip",
+                    )
 
-                        st.success("Processing complete! Click below to download the analysis results.")
-                        
-                        # Offer download button
-                        st.download_button(
-                            label="Download Analysis Results",
-                            data=zip_buffer.getvalue(),
-                            file_name=f"comparison_results_{timestamp}.zip",
-                            mime="application/zip",
-                        )
-
-                except Exception as e:
-                    st.error(f"An error occurred: {str(e)}")
-
+            except Exception as e:
+                progress_text.empty()
+                st.error(f"An error occurred: {str(e)}")
 
 if __name__ == "__main__":
     main()
