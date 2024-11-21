@@ -638,102 +638,71 @@ def main():
         new_file = st.file_uploader("Upload new version CSV", type=["csv"])
 
     if old_file and new_file:
-        if st.button("Process Files", type="primary"):
-            with st.spinner("Processing files..."):
-                try:
-                    # Create temporary directory
-                    with tempfile.TemporaryDirectory() as temp_dir:
-                        # Save uploaded files
-                        old_path = os.path.join(temp_dir, "old_file.csv")
-                        new_path = os.path.join(temp_dir, "new_file.csv")
+        try:
+            # Create temporary directory
+            with tempfile.TemporaryDirectory() as temp_dir:
+                # Save uploaded files
+                old_path = os.path.join(temp_dir, "old_file.csv")
+                new_path = os.path.join(temp_dir, "new_file.csv")
 
-                        with open(old_path, "wb") as f:
-                            f.write(old_file.getbuffer())
-                        with open(new_path, "wb") as f:
-                            f.write(new_file.getbuffer())
+                with open(old_path, "wb") as f:
+                    f.write(old_file.getbuffer())
+                with open(new_path, "wb") as f:
+                    f.write(new_file.getbuffer())
 
-                        # Initialize analyzer
-                        analyzer = VersionComparisonAnalyzer(old_path, new_path)
+                # Initialize analyzer
+                analyzer = VersionComparisonAnalyzer(old_path, new_path)
 
-                        # Process data
-                        analyzer.merge_datasets()
-                        analyzer.calculate_differences()
+                # Process data
+                analyzer.merge_datasets()
+                analyzer.calculate_differences()
 
-                        # Create results directory
-                        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                        results_dir = os.path.join(
-                            temp_dir, f"comparison_results_{timestamp}"
-                        )
-                        os.makedirs(results_dir, exist_ok=True)
+                # Create results directory
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                results_dir = os.path.join(
+                    temp_dir, f"comparison_results_{timestamp}"
+                )
+                os.makedirs(results_dir, exist_ok=True)
 
-                        # Generate reports
-                        version_report = analyzer.generate_summary_report()
-                        with open(
-                            os.path.join(results_dir, "version_comparison_report.md"),
-                            "w",
-                        ) as f:
-                            f.write(version_report)
+                # Generate reports and plots
+                version_report = analyzer.generate_summary_report()
+                with open(
+                    os.path.join(results_dir, "version_comparison_report.md"),
+                    "w",
+                ) as f:
+                    f.write(version_report)
 
-                        # Display summary report
-                        st.markdown("## Summary Report")
-                        st.markdown(version_report)
+                analyzer.plot_summary_changes()
+                plt.savefig(os.path.join(results_dir, "summary_changes.png"))
+                plt.close()
 
-                        # Generate and display plots
-                        st.markdown("## Visualizations")
+                analyzer.generate_heatmap()
+                analyzer.export_detailed_statistics()
+                analyzer.generate_category_analysis()
+                analyzer.generate_table_heatmaps()
+                analyzer.generate_summary_csv()
 
-                        # Summary changes plot
-                        analyzer.plot_summary_changes()
-                        plt.savefig(os.path.join(results_dir, "summary_changes.png"))
-                        st.image(os.path.join(results_dir, "summary_changes.png"))
-                        plt.close()
+                # Create zip file
+                zip_buffer = BytesIO()
+                with zipfile.ZipFile(
+                    zip_buffer, "w", zipfile.ZIP_DEFLATED
+                ) as zip_file:
+                    for root, _, files in os.walk(results_dir):
+                        for file in files:
+                            file_path = os.path.join(root, file)
+                            arc_name = os.path.relpath(file_path, results_dir)
+                            zip_file.write(file_path, arc_name)
 
-                        # Generate heatmap
-                        analyzer.generate_heatmap()
-                        st.image(os.path.join(results_dir, "changes_heatmap.png"))
+                # Offer download button
+                st.download_button(
+                    label="Download Analysis Results",
+                    data=zip_buffer.getvalue(),
+                    file_name=f"comparison_results_{timestamp}.zip",
+                    mime="application/zip",
+                )
 
-                        # Generate other analyses
-                        analyzer.export_detailed_statistics()
-                        analyzer.generate_category_analysis()
-                        analyzer.generate_table_heatmaps()
-                        analyzer.generate_summary_csv()
-
-                        # Create zip file
-                        zip_buffer = BytesIO()
-                        with zipfile.ZipFile(
-                            zip_buffer, "w", zipfile.ZIP_DEFLATED
-                        ) as zip_file:
-                            for root, _, files in os.walk(results_dir):
-                                for file in files:
-                                    file_path = os.path.join(root, file)
-                                    arc_name = os.path.relpath(file_path, results_dir)
-                                    zip_file.write(file_path, arc_name)
-
-                        # Offer download button
-                        st.download_button(
-                            label="Download Complete Analysis",
-                            data=zip_buffer.getvalue(),
-                            file_name=f"comparison_results_{timestamp}.zip",
-                            mime="application/zip",
-                        )
-
-                except Exception as e:
-                    st.error(f"An error occurred: {str(e)}")
-
-    # Instructions
-    with st.expander("Instructions"):
-        st.markdown(
-            """
-        1. Upload the old version CSV file
-        2. Upload the new version CSV file
-        3. Click "Process Files" to generate the analysis
-        4. View the results directly in the browser
-        5. Download the complete analysis package
-        
-        **Note**: The CSV files should contain the following columns:
-        - Model
-        - Metrics columns (e.g., "Non-Live AST Acc", "Live Acc", etc.)
-        """
-        )
+        except Exception as e:
+            st.error(f"An error occurred: {str(e)}")
 
 
 if __name__ == "__main__":
